@@ -3,7 +3,7 @@
 SKSE plugin for Skyrim SE/AE: your follower rides behind you on your horse. Press **K** while mounted to seat the
 nearest follower behind you, press it again (or dismount) to let them off. Settings in `RideAlong.ini`.
 
-Nexus page: <add the Nexus link here>
+Nexus page: https://www.nexusmods.com/games/skyrimspecialedition
 
 ## License
 
