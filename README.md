@@ -1,43 +1,37 @@
 # Ride Along
 
-SKSE plugin for Skyrim SE/AE: your follower rides behind you on your horse. Press **K** while mounted to seat the
-nearest follower behind you, press it again (or dismount) to let them off. Settings in `RideAlong.ini`.
+An SKSE plugin for Skyrim Special Edition / Anniversary Edition: your follower rides behind you on your horse.
 
-Nexus page: https://www.nexusmods.com/games/skyrimspecialedition
+Nexus: https://www.nexusmods.com/skyrimspecialedition/mods/194579
 
-## License
-
-Ride Along is free software, licensed under the **GNU General Public License v3.0 or later** (see `LICENSE`).
-
-It is built on [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) (GPL-3.0-or-later with the Modding
-Exception and the GPL-3.0 Linking Exception), which is statically linked into `RideAlong.dll`. This repository is the
-Corresponding Source for the released DLL.
-
-## Building
-
-Requirements (Windows):
-- Visual Studio 2022 or newer **Build Tools** with "Desktop development with C++" and "C++ CMake tools for Windows"
-- Git for Windows
-
-Run `build.bat`. On the first run it downloads vcpkg and CommonLibSSE-NG v11.0.0 (into `extern/`), which takes a while.
-The plugin is written to `dist\SKSE\Plugins\RideAlong.dll` (set the `MODDIR` environment variable to copy it straight
-into a mod folder instead). Progress and errors go to `build.log`.
-
-Manual build:
-```
-git clone --depth 1 --branch v11.0.0 --recurse-submodules https://github.com/alandtse/CommonLibSSE-NG.git extern/CommonLibSSE-NG
-cmake -S . -B build -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
-cmake --build build --config Release
-```
+## Features (v0.2.0)
+- Ask a follower "Ride with me." / "You can get down now." (RideAlong.esp), or use a hotkey / held controller button
+- Passenger pinned to the saddle every frame, copying your leg movement
+- Dismount animation, stepping down on the horse's left
+- Peaceful passenger: stays out of fights while riding, AI stays on so you can still talk
+- Optional Princess Seat (side-saddle for female passengers) via Open Animation Replacer
+- In-game settings in SKSE Menu Framework; everything also in `RideAlong.ini`
 
 ## Files
+| Path | What it is |
+|---|---|
+| `src/main.cpp` | the whole plugin |
+| `src/PCH.h` | precompiled header |
+| `src/SKSEMenuFramework.h` | SKSE Menu Framework API header (optional settings page) |
+| `RideAlong.ini` | default settings |
+| `esp/RideAlong.esp` | the dialogue plugin (ESL) |
+| `esp_tools/` | Python script that generates `RideAlong.esp` |
+| `princess_seat/` | OAR config for the optional Princess Seat add-on (animations not included, see its readme) |
+| `build.bat` | one-click build |
 
-- `src/main.cpp` - the whole plugin: hotkey, boarding/alighting, seating the passenger on the saddle every frame,
-  leg pose copy, movement hook, cell-change handling, drive-by combat (bow swap / hold on)
-- `src/PCH.h` - precompiled header
-- `RideAlong.ini` - user settings (shipped next to the DLL)
+## Building
+Requirements: Windows, Git, Visual Studio 2022 Build Tools (C++), CMake 3.25+.
 
-## Credits
+1. Clone CommonLibSSE-NG into `extern/CommonLibSSE-NG` (`build.bat` does this if Git is installed).
+2. Edit `MODDIR` at the top of `build.bat` to point at your mod folder.
+3. Run `build.bat`. The first build downloads dependencies and can take 15-30 minutes. Output: `build/Release/RideAlong.dll`.
 
-- CommonLibSSE-NG (Ryan McKenzie, powerof3, CharmedBaryon, alandtse and contributors)
-- SKSE team; meh321 for Address Library
+## License
+GPL-3.0-or-later (see `LICENSE`).
+Built with [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG), licensed GPL-3.0-or-later WITH Modding Exception AND GPL-3.0 Linking Exception (with Corresponding Source).
+The Princess Seat's side-saddle animations are yukl's (YY Anim Replacer - Princess' Horse Riding) and are not part of this repository.

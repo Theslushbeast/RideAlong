@@ -2,8 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "LOG=%~dp0build.log"
-rem Where the built plugin is copied. Point this at your mod manager's mod folder if you like.
-if not defined MODDIR set "MODDIR=%~dp0dist"
+set "MODDIR=D:\Games\Skyrim SE Virtual Folder\mods\Ride Along"
 set "TOOLS=%LOCALAPPDATA%\RideAlongTools"
 
 echo ================================================== > "%LOG%"
@@ -92,7 +91,9 @@ rem ---------- install into the MO2 mod folder ----------
 if not exist "%MODDIR%\SKSE\Plugins" mkdir "%MODDIR%\SKSE\Plugins"
 copy /y "build\Release\RideAlong.dll" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
 if exist "build\Release\RideAlong.pdb" copy /y "build\Release\RideAlong.pdb" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
-copy /y "RideAlong.ini" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
+if not exist "%MODDIR%\SKSE\Plugins\RideAlong.ini" copy /y "RideAlong.ini" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
+if exist "esp\RideAlong.esp" copy /y "esp\RideAlong.esp" "%MODDIR%\" >> "%LOG%" 2>&1
+copy /y "README_PrincessSeat.txt" "%MODDIR%\" >> "%LOG%" 2>&1
 echo [OK] Built and copied to "%MODDIR%" >> "%LOG%"
 echo.
 echo  Done. The plugin is in the MO2 mod "Ride Along". Enable it in MO2 if it is new.

@@ -1,5 +1,5 @@
 build/
-dist/
 extern/
-build.log
+*.log
 *.bak
+.vs/
