@@ -13,15 +13,24 @@
 // detached while it rides, so it has no physics to fight the horse with.
 
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
 
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
+
+#ifndef NOMINMAX
+#	define NOMINMAX
+#endif
+#include "SKSEMenuFramework.h"  // optional in-game settings page (SKSE Menu Framework); does nothing when it isn't installed
 
 #ifdef GetObject
 #	undef GetObject  // windows.h renames it GetObjectA, which breaks BGSDefaultObjectManager::GetObject
@@ -43,13 +52,28 @@ namespace RideAlong
 		std::string   anchorNode{ "SaddleBone" };  // horse skeleton node the passenger is pinned to
 		std::string   poseEvent{ "HorseEnterInstant" };
 		std::string   exitEvent{ "IdleForceDefaultState" };
-		bool          dismountInCombat{ false };
+		bool          noCombat{ true };  // the passenger stays out of fights while she rides (her AI stays on: you can still talk to her)
 		std::string   syncVars{ "Speed,Direction,TurnDelta,SpeedSampled,IsSprinting,bIsSprinting,iSyncSprintState,fSpeedMult,HorseSpeed,TurnDeltaDamped,SpeedDamped" };
 		bool          dumpGraphVars{ false };
 		bool          copyPose{ true };
 		std::string   copyBones{ "Thigh,Calf,Foot,Toe,Pelvis" };
 		std::string   skipBones{ "Head,Neck,Eye,Jaw,Tongue,Brow,Lip,Cheek,Mouth,Root,Weapon,Shield,Quiver,Sheath,Magic,Camera,Saddle,Hair" };
 		std::string   moveBones{ "" };
+		// 0.2: dialogue, controller, menu, dismount, princess seat
+		bool          hotkeyEnabled{ true };
+		std::uint32_t padButton{ 0 };              // controller button (0 = none); see the list in RideAlong.ini
+		float         padHold{ 0.6f };             // seconds the controller button must be held
+		bool          dialogueEnabled{ true };     // "Ride with me." / "You can get down now." (needs RideAlong.esp)
+		bool          dismountAnim{ true };        // play a dismount animation before stepping off
+		std::string   dismountEvent{ "HorseExit" };
+		float         dismountSeconds{ 1.2f };
+		bool          princess{ false };           // female passengers sit sideways (needs an OAR animation, see the readme)
+		bool          princessCopyPose{ false };
+		float         pBack{ 30.0f };
+		float         pUp{ -2.0f };
+		float         pSide{ 0.0f };
+		float         pTurn{ 90.0f };              // degrees the passenger is turned on the seat (+ = facing the horse's right)
+		std::string   pDismountEvent{ "" };        // empty = DismountEvent
 	};
 	Settings g;
 
@@ -114,16 +138,156 @@ namespace RideAlong
 					g.moveBones = val;
 				} else if (key == "DumpGraphVariables") {
 					g.dumpGraphVars = std::stoi(val) != 0;
-				} else if (key == "DismountInCombat") {
-					g.dismountInCombat = std::stoi(val) != 0;
+				} else if (key == "PeacefulPassenger") {
+					g.noCombat = std::stoi(val) != 0;
+				} else if (key == "HotkeyEnabled") {
+					g.hotkeyEnabled = std::stoi(val) != 0;
+				} else if (key == "GamepadButton") {
+					g.padButton = static_cast<std::uint32_t>(std::stoul(val, nullptr, 0));
+				} else if (key == "GamepadHoldSeconds") {
+					g.padHold = std::stof(val);
+				} else if (key == "DialogueEnabled") {
+					g.dialogueEnabled = std::stoi(val) != 0;
+				} else if (key == "DismountAnimation") {
+					g.dismountAnim = std::stoi(val) != 0;
+				} else if (key == "DismountEvent") {
+					g.dismountEvent = val;
+				} else if (key == "DismountSeconds") {
+					g.dismountSeconds = std::stof(val);
+				} else if (key == "PrincessSeat") {
+					g.princess = std::stoi(val) != 0;
+				} else if (key == "PrincessCopyPose") {
+					g.princessCopyPose = std::stoi(val) != 0;
+				} else if (key == "PrincessBackOffset") {
+					g.pBack = std::stof(val);
+				} else if (key == "PrincessUpOffset") {
+					g.pUp = std::stof(val);
+				} else if (key == "PrincessSideOffset") {
+					g.pSide = std::stof(val);
+				} else if (key == "PrincessTurnDegrees") {
+					g.pTurn = std::stof(val);
+				} else if (key == "PrincessDismountEvent") {
+					g.pDismountEvent = val;
 				}
 			} catch (...) {
 				logger::warn("RideAlong.ini: bad value for {}: '{}'", key, val);
 			}
 		}
 		logger::info("sync variables: {}", g.syncVars);
-		logger::info("settings: hotkey=0x{:X} back={} up={} side={} range={} anchor={} pose={} exit={} combatDismount={}",
-			g.hotkey, g.back, g.up, g.side, g.range, g.anchorNode, g.poseEvent, g.exitEvent, g.dismountInCombat);
+		logger::info("settings: hotkey=0x{:X} back={} up={} side={} range={} anchor={} pose={} exit={} peaceful={}",
+			g.hotkey, g.back, g.up, g.side, g.range, g.anchorNode, g.poseEvent, g.exitEvent, g.noCombat);
+		logger::info("settings: hotkeyOn={} pad=0x{:X} hold={} dialogue={} dismountAnim={} ({} {}s) princess={} ({} {} {} turn {})",
+			g.hotkeyEnabled, g.padButton, g.padHold, g.dialogueEnabled, g.dismountAnim, g.dismountEvent, g.dismountSeconds,
+			g.princess, g.pBack, g.pUp, g.pSide, g.pTurn);
+	}
+
+	// Writes the settings the in-game menu can change back into RideAlong.ini, keeping every comment and line order.
+	void SaveSettings()
+	{
+		const std::map<std::string, std::string> values{
+			{ "Hotkey", std::format("0x{:X}", g.hotkey) },
+			{ "HotkeyEnabled", g.hotkeyEnabled ? "1" : "0" },
+			{ "GamepadButton", std::format("0x{:X}", g.padButton) },
+			{ "GamepadHoldSeconds", std::format("{:.2f}", g.padHold) },
+			{ "DialogueEnabled", g.dialogueEnabled ? "1" : "0" },
+			{ "Range", std::format("{:.0f}", g.range) },
+			{ "PeacefulPassenger", g.noCombat ? "1" : "0" },
+			{ "BackOffset", std::format("{:.1f}", g.back) },
+			{ "UpOffset", std::format("{:.1f}", g.up) },
+			{ "SideOffset", std::format("{:.1f}", g.side) },
+			{ "DismountAnimation", g.dismountAnim ? "1" : "0" },
+			{ "DismountSeconds", std::format("{:.2f}", g.dismountSeconds) },
+			{ "PrincessSeat", g.princess ? "1" : "0" },
+			{ "PrincessCopyPose", g.princessCopyPose ? "1" : "0" },
+			{ "PrincessBackOffset", std::format("{:.1f}", g.pBack) },
+			{ "PrincessUpOffset", std::format("{:.1f}", g.pUp) },
+			{ "PrincessSideOffset", std::format("{:.1f}", g.pSide) },
+			{ "PrincessTurnDegrees", std::format("{:.0f}", g.pTurn) },
+		};
+		const char*              path = "Data/SKSE/Plugins/RideAlong.ini";
+		std::vector<std::string> lines;
+		{
+			std::ifstream in(path);
+			for (std::string line; std::getline(in, line);) {
+				if (!line.empty() && line.back() == '\r') line.pop_back();
+				lines.push_back(line);
+			}
+		}
+		std::map<std::string, bool> written;
+		for (auto& line : lines) {
+			const auto t = Trim(line);
+			if (t.empty() || t[0] == ';' || t[0] == '#' || t[0] == '[') continue;
+			const auto eq = t.find('=');
+			if (eq == std::string::npos) continue;
+			const auto key = Trim(t.substr(0, eq));
+			if (auto it = values.find(key); it != values.end() && !written[key]) {
+				line = key + " = " + it->second;
+				written[key] = true;
+			}
+		}
+		bool header = false;
+		for (const auto& [key, val] : values) {
+			if (written[key]) continue;
+			if (!header) {
+				lines.push_back("");
+				lines.push_back("; ---- saved by the in-game settings page");
+				header = true;
+			}
+			lines.push_back(key + " = " + val);
+		}
+		std::ofstream out(path, std::ios::trunc);
+		for (const auto& line : lines) out << line << "\n";
+		logger::info("settings saved to RideAlong.ini");
+	}
+
+	// ------------------------------------------------------------------ RideAlong.esp (optional): dialogue, passenger faction
+	constexpr const char* PLUGIN_FILE = "RideAlong.esp";
+	RE::TESFaction*    passengerFaction{ nullptr };  // OAR can test it: IsInFaction RideAlong.esp|0x802
+	RE::TESGlobal*     dialogueGlobal{ nullptr };
+	RE::TESTopic*      rideTopic{ nullptr };
+	RE::TESTopic*      offTopic{ nullptr };
+	RE::TESQuest*      dialogueQuest{ nullptr };
+
+	void LoadForms()
+	{
+		auto dh = RE::TESDataHandler::GetSingleton();
+		if (!dh || !dh->LookupModByName(PLUGIN_FILE)) {
+			logger::info("{} is not active - dialogue and the passenger faction are off (the hotkey still works)", PLUGIN_FILE);
+			return;
+		}
+		dialogueQuest = dh->LookupForm<RE::TESQuest>(0x800, PLUGIN_FILE);
+		passengerFaction = dh->LookupForm<RE::TESFaction>(0x802, PLUGIN_FILE);
+		dialogueGlobal = dh->LookupForm<RE::TESGlobal>(0x803, PLUGIN_FILE);
+		rideTopic = dh->LookupForm<RE::TESTopic>(0x810, PLUGIN_FILE);
+		offTopic = dh->LookupForm<RE::TESTopic>(0x811, PLUGIN_FILE);
+		logger::info("{}: quest {} faction {} global {} topics {} {}", PLUGIN_FILE, dialogueQuest != nullptr, passengerFaction != nullptr,
+			dialogueGlobal != nullptr, rideTopic != nullptr, offTopic != nullptr);
+	}
+
+	void ApplyDialogueSetting(bool a_startQuest)
+	{
+		if (dialogueGlobal) {
+			dialogueGlobal->value = g.dialogueEnabled ? 1.0f : 0.0f;
+		}
+		if (a_startQuest && dialogueQuest && !dialogueQuest->IsRunning()) {
+			dialogueQuest->Start();  // a save made before the plugin was installed
+		}
+	}
+
+	void SetPassengerTag(RE::Actor* a_actor, bool a_on)
+	{
+		if (!passengerFaction || !a_actor) return;
+		if (a_on) {
+			a_actor->AddToFaction(passengerFaction, 0);
+		} else {
+			a_actor->RemoveFromFaction(passengerFaction);
+		}
+	}
+
+	bool IsFemale(RE::Actor* a_actor)
+	{
+		auto base = a_actor ? a_actor->GetActorBase() : nullptr;
+		return base && base->GetSex() == RE::SEX::kFemale;
 	}
 
 	// ------------------------------------------------------------------ state
@@ -140,12 +304,18 @@ namespace RideAlong
 	RE::NiPoint3    seatPos{};          // where the passenger sat last frame (the movement hook keeps her there)
 	float           seatYaw{ 0.0f };
 	std::atomic<bool> haveSeat{ false };
-	// drive-by: a passenger in combat shoots from the saddle if she can; a melee-only passenger holds on
-	bool            swappedToBow{ false };
-	RE::FormID      prevRight{ 0 };
-	RE::FormID      prevLeft{ 0 };
-	bool            toldHoldOn{ false };
 	std::uint32_t   combatCheckTime{ 0 };
+	std::uint32_t   combatStops{ 0 };   // how often she was pulled out of a fight this ride (for the log)
+	// 0.2
+	bool            princessNow{ false };   // the current passenger sits sideways
+	bool            dismounting{ false };   // playing the dismount animation, still pinned to the seat
+	bool            dismountAnnounce{ false };
+	std::uint32_t   dismountStart{ 0 };
+	RE::ActorHandle pendingH;               // agreed to ride (in dialogue) while you were on foot
+	bool            pendingQueued{ false };
+	RE::ActorHandle askedRideH;             // chosen in dialogue, handled when the dialogue closes
+	RE::ActorHandle askedOffH;
+	bool            padFired{ false };
 
 	// ------------------------------------------------------------------ behavior graph variables
 	enum class VarType
@@ -375,7 +545,6 @@ namespace RideAlong
 	void Reset()
 	{
 		haveSeat = false;
-		toldHoldOn = false;
 		passengerH.reset();
 		horseH.reset();
 		posePending = false;
@@ -385,6 +554,8 @@ namespace RideAlong
 		bones.clear();
 		bonesTo = nullptr;
 		bonesFrom = nullptr;
+		princessNow = false;
+		dismounting = false;
 	}
 
 	// Papyrus MoveTo: moves a reference and rebuilds its physics (gives the passenger its character controller back)
@@ -394,6 +565,56 @@ namespace RideAlong
 		static REL::Relocation<func_t> func{ RELOCATION_ID(56227, 56626) };
 		const RE::ObjectRefHandle      handle = a_target->RE::TESObjectREFR::GetHandle();
 		func(a_ref, handle, a_target->GetParentCell(), a_target->GetWorldspace(), a_pos, a_rot);
+	}
+
+	// Keeps the passenger out of fights while she rides: her AI stays on (so you can talk to her and she follows
+	// her packages as usual), but any combat she's drawn into is ended and her weapon goes back away at once.
+	// Calm: she won't start fights or join yours (Aggression 0 = unaggressive, Assistance 0 = helps nobody).
+	// Restored from her own NPC record when she gets off.
+	void SetCalm(RE::Actor* a_actor, bool a_calm)
+	{
+		auto avo = a_actor ? a_actor->AsActorValueOwner() : nullptr;
+		auto npc = a_actor ? a_actor->GetActorBase() : nullptr;
+		if (!avo || !npc) return;
+		auto base = static_cast<RE::ActorValueOwner*>(npc);
+		for (auto av : { RE::ActorValue::kAggression, RE::ActorValue::kAssistance }) {
+			avo->SetActorValue(av, a_calm ? 0.0f : base->GetActorValue(av));
+		}
+	}
+
+	// Keeps her out of anything that still reaches her (an enemy attacking her directly). Her weapon is NOT forced
+	// away every frame - that fought her AI and made her draw and sheathe over and over. It goes away once the
+	// fight is over.
+	void KeepPeaceful(RE::Actor* a_passenger)
+	{
+		if (a_passenger->IsInCombat()) {
+			a_passenger->StopCombat();
+			if (combatStops++ % 200 == 0) {
+				logger::info("{}: kept out of the fight ({}x this ride)", a_passenger->GetDisplayFullName(), combatStops);
+			}
+			return;
+		}
+		const auto player = RE::PlayerCharacter::GetSingleton();
+		if (auto st = a_passenger->AsActorState(); st && st->IsWeaponDrawn() && !player->IsInCombat()) {
+			a_passenger->DrawWeaponMagicHands(false);
+		}
+	}
+
+	// After loading nobody is riding: anyone a save caught on the seat loses the passenger tag (and gets back the AI
+	// an earlier test build switched off while riding).
+	void ReleaseSavedPassengers()
+	{
+		if (!passengerFaction) return;
+		for (auto& h : RE::ProcessLists::GetSingleton()->highActorHandles) {
+			auto a = h.get();
+			if (a && a->IsInFaction(passengerFaction)) {
+				SetPassengerTag(a.get(), false);
+				SetCalm(a.get(), false);
+				a->EnableAI(true);
+				a->EvaluatePackage(true, false);
+				logger::info("{}: released (saved while riding)", a->GetDisplayFullName());
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------ riding
@@ -407,17 +628,18 @@ namespace RideAlong
 		RE::NiAVObject*          anchor = root->GetObjectByName(anchorName);
 
 		const RE::NiPoint3 base = anchor ? anchor->world.translate : root->world.translate;
-		const RE::NiPoint3 offset{ g.side, -g.back, g.up };
+		const RE::NiPoint3 offset = princessNow ? RE::NiPoint3{ g.pSide, -g.pBack, g.pUp } : RE::NiPoint3{ g.side, -g.back, g.up };
 		const RE::NiPoint3 pos = base + root->world.rotate * offset;
+		const float        yaw = a_horse->data.angle.z + (princessNow ? g.pTurn * 0.01745329f : 0.0f);
 
 		if (a_passenger->GetCharController()) {
 			a_passenger->DetachCharController();  // no capsule: nothing to collide with the horse, no AI walking
 		}
 		a_passenger->data.location = pos;
 		seatPos = pos;
-		seatYaw = a_horse->data.angle.z;
+		seatYaw = yaw;
 		haveSeat = true;
-		a_passenger->data.angle = RE::NiPoint3{ 0.0f, 0.0f, a_horse->data.angle.z };
+		a_passenger->data.angle = RE::NiPoint3{ 0.0f, 0.0f, yaw };
 		a_passenger->Update3DPosition(true);
 
 		if (frames++ % 600 == 0) {
@@ -426,16 +648,41 @@ namespace RideAlong
 		return true;
 	}
 
+	// The side-saddle animations are yukl's (YY Anim Replacer - Princess' Horse Riding) and are not shipped with
+	// Ride Along: the player copies them from that mod into the Princess Seat add-on's OAR folder. Without them she
+	// rides astride as normal.
+	bool PrincessAnimsInstalled()
+	{
+		static int state = -1;
+		if (state < 0) {
+			std::error_code ec;
+			state = std::filesystem::exists("Data/meshes/actors/character/animations/OpenAnimationReplacer/RideAlongPrincess/Passenger/horse_rider/idle.hkx", ec) ? 1 : 0;
+			logger::info("princess seat animations: {}", state ? "found" : "NOT found - copy YY Anim Replacer - Princess' Horse Riding's horse_rider folder into the Princess Seat add-on (see its readme)");
+		}
+		return state == 1;
+	}
+
 	void Board(RE::Actor* a_passenger, RE::Actor* a_horse)
 	{
 		passengerH = a_passenger->GetHandle();
 		horseH = a_horse->GetHandle();
 		leaving = false;
+		dismounting = false;
 		frames = 0;
+		pendingH.reset();
+		princessNow = g.princess && IsFemale(a_passenger) && PrincessAnimsInstalled();
+		SetPassengerTag(a_passenger, true);  // before the pose event, so an OAR replacer sees it on the first clip
+		if (g.noCombat) {
+			a_passenger->StopCombat();
+			a_passenger->DrawWeaponMagicHands(false);  // weapon away for the ride
+			SetCalm(a_passenger, true);
+		}
+		combatStops = 0;
 		a_passenger->DetachCharController();
 		Place(a_passenger, a_horse);
 		const bool ok = a_passenger->NotifyAnimationGraph(RE::BSFixedString(g.poseEvent.c_str()));
 		logger::info("board: {} -> pose event '{}' {}", a_passenger->GetDisplayFullName(), g.poseEvent, ok ? "accepted" : "REJECTED");
+
 		auto player = RE::PlayerCharacter::GetSingleton();
 		BuildSyncList(player);
 		boardTime = RE::GetDurationOfApplicationRunTime();
@@ -447,120 +694,7 @@ namespace RideAlong
 		Notify(std::format("{} rides with you.", a_passenger->GetDisplayFullName()));
 	}
 
-	// ------------------------------------------------------------------ drive-by
-	bool IsRanged(RE::Actor* a_actor)
-	{
-		for (const bool left : { false, true }) {
-			auto f = a_actor->GetEquippedObject(left);
-			if (!f) {
-				continue;
-			}
-			if (auto w = f->As<RE::TESObjectWEAP>(); w && (w->IsBow() || w->IsCrossbow())) {
-				return true;
-			}
-			if (f->Is(RE::FormType::Spell)) {
-				return true;  // a caster counts as ranged
-			}
-		}
-		return false;
-	}
-
-	// the strongest bow or crossbow she carries that she also has ammunition for
-	RE::TESObjectWEAP* BestBow(RE::Actor* a_actor)
-	{
-		bool arrows = false, bolts = false;
-		auto ammo = a_actor->GetInventory([](RE::TESBoundObject& o) { return o.Is(RE::FormType::Ammo); });
-		for (auto& [obj, data] : ammo) {
-			if (data.first > 0) {
-				if (auto am = obj->As<RE::TESAmmo>(); am && am->IsBolt()) {
-					bolts = true;
-				} else {
-					arrows = true;
-				}
-			}
-		}
-		RE::TESObjectWEAP* best = nullptr;
-		int                bestDmg = -1;
-		auto               inv = a_actor->GetInventory([](RE::TESBoundObject& o) {
-            auto w = o.As<RE::TESObjectWEAP>();
-            return w && (w->IsBow() || w->IsCrossbow());
-        });
-		for (auto& [obj, data] : inv) {
-			auto w = obj->As<RE::TESObjectWEAP>();
-			if (!w || data.first <= 0 || (w->IsCrossbow() ? !bolts : !arrows)) {
-				continue;
-			}
-			if (static_cast<int>(w->attackDamage) > bestDmg) {
-				bestDmg = w->attackDamage;
-				best = w;
-			}
-		}
-		return best;
-	}
-
-	void CombatControl(RE::Actor* a_passenger)
-	{
-		if (!a_passenger->IsInCombat()) {
-			return;
-		}
-		if (IsRanged(a_passenger)) {
-			return;  // bow, crossbow or spells in hand: let her fight from the saddle
-		}
-		if (!swappedToBow) {
-			if (auto bow = BestBow(a_passenger)) {
-				auto r = a_passenger->GetEquippedObject(false);
-				auto l = a_passenger->GetEquippedObject(true);
-				prevRight = r ? r->GetFormID() : 0;
-				prevLeft = l ? l->GetFormID() : 0;
-				swappedToBow = true;
-				RE::ActorEquipManager::GetSingleton()->EquipObject(a_passenger, bow);
-				Notify(std::format("{} draws a {}.", a_passenger->GetDisplayFullName(), bow->GetName()));
-				logger::info("drive-by: equipped {} (was right={:X} left={:X})", bow->GetName(), prevRight, prevLeft);
-				return;
-			}
-		}
-		// nothing to shoot with: she holds on instead of jumping into a melee from the horse's back
-		a_passenger->StopCombat();
-		if (!toldHoldOn) {
-			toldHoldOn = true;
-			Notify(std::format("{} has no bow - holding on.", a_passenger->GetDisplayFullName()));
-		}
-	}
-
-	// back to the weapons she had before the ride
-	void RestoreWeapons(RE::Actor* a_passenger)
-	{
-		if (!swappedToBow || !a_passenger) {
-			swappedToBow = false;
-			return;
-		}
-		swappedToBow = false;
-		auto  mgr = RE::ActorEquipManager::GetSingleton();
-		auto  dom = RE::BGSDefaultObjectManager::GetSingleton();
-		auto* rightSlot = dom ? dom->GetObject<RE::BGSEquipSlot>(RE::DEFAULT_OBJECT::kRightHandEquip) : nullptr;
-		auto* leftSlot = dom ? dom->GetObject<RE::BGSEquipSlot>(RE::DEFAULT_OBJECT::kLeftHandEquip) : nullptr;
-		if (auto r = RE::TESForm::LookupByID(prevRight)) {
-			if (r->Is(RE::FormType::Weapon)) {
-				mgr->EquipObject(a_passenger, r->As<RE::TESBoundObject>(), nullptr, 1, rightSlot);
-			} else if (auto sp = r->As<RE::SpellItem>()) {
-				mgr->EquipSpell(a_passenger, sp, rightSlot);
-			}
-		}
-		if (auto l = RE::TESForm::LookupByID(prevLeft)) {
-			if (l->Is(RE::FormType::Weapon)) {
-				mgr->EquipObject(a_passenger, l->As<RE::TESBoundObject>(), nullptr, 1, leftSlot);
-			} else if (l->Is(RE::FormType::Armor)) {
-				mgr->EquipObject(a_passenger, l->As<RE::TESBoundObject>());  // shield / torch
-			} else if (auto sp = l->As<RE::SpellItem>()) {
-				mgr->EquipSpell(a_passenger, sp, leftSlot);
-			} else if (auto light = l->As<RE::TESObjectLIGH>()) {
-				mgr->EquipObject(a_passenger, light);
-			}
-		}
-		logger::info("drive-by: weapons restored");
-	}
-
-	void Alight(bool a_announce)
+	void FinishAlight(bool a_announce)
 	{
 		haveSeat = false;
 		auto passenger = passengerH.get();
@@ -569,18 +703,77 @@ namespace RideAlong
 		if (!passenger) {
 			return;
 		}
-		RE::Actor*         anchor = horse ? horse.get() : RE::PlayerCharacter::GetSingleton();
-		const float        a = anchor->data.angle.z;
-		const RE::NiPoint3 spot = anchor->data.location + RE::NiPoint3{ std::cos(a) * 110.0f, -std::sin(a) * 110.0f, 0.0f };  // to the horse's right
-
+		// Leave the passenger tag on for a moment: taking it off swaps the OAR animation set (princess seat) while
+		// the graph is still leaving the riding state, which can crash the game. Drop it once she's on her feet.
+		{
+			RE::ActorHandle h = passenger->GetHandle();
+			std::thread([h] {
+				std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+				SKSE::GetTaskInterface()->AddTask([h] {
+					auto a = h.get();
+					if (a && a != passengerH.get()) SetPassengerTag(a.get(), false);  // unless she climbed back on
+				});
+			}).detach();
+		}
+		// Step 1 now: end the riding animation. Steps 2 and 3 a few frames later - doing the animation change
+		// and the move (which rebuilds her physics) in the same frame crashed the game in the cloth/hair physics (FSMP).
+		SetCalm(passenger.get(), false);
 		passenger->NotifyAnimationGraph(RE::BSFixedString(g.exitEvent.c_str()));
-		MoveTo(passenger.get(), anchor, spot, RE::NiPoint3{ 0.0f, 0.0f, a });
-		RestoreWeapons(passenger.get());
-		passenger->EvaluatePackage(true, false);
 		logger::info("alight: {}", passenger->GetDisplayFullName());
 		if (a_announce) {
 			Notify(std::format("{} gets off.", passenger->GetDisplayFullName()));
 		}
+		const RE::ActorHandle ph = passenger->GetHandle();
+		const RE::ActorHandle hh = horse ? horse->GetHandle() : RE::ActorHandle{};
+		std::thread([ph, hh] {
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			SKSE::GetTaskInterface()->AddTask([ph, hh] {
+				auto p = ph.get();
+				if (!p || p == passengerH.get() || p->IsDead() || !p->Is3DLoaded()) {
+					return;  // gone, dead, unloaded, or already back on the horse
+				}
+				auto               h = hh.get();
+				RE::Actor*         anchor = (h && !h->IsDead()) ? h.get() : RE::PlayerCharacter::GetSingleton();
+				const float        a = anchor->data.angle.z;
+				const RE::NiPoint3 spot = anchor->data.location + RE::NiPoint3{ -std::cos(a) * 110.0f, std::sin(a) * 110.0f, 0.0f };  // the horse's left
+				MoveTo(p.get(), anchor, spot, RE::NiPoint3{ 0.0f, 0.0f, a });
+				logger::info("alight: set down beside the horse");
+				std::thread([ph] {
+					std::this_thread::sleep_for(std::chrono::milliseconds(250));
+					SKSE::GetTaskInterface()->AddTask([ph] {
+						auto p = ph.get();
+						if (!p || p == passengerH.get() || p->IsDead()) {
+							return;
+						}
+						p->EvaluatePackage(true, false);
+					});
+				}).detach();
+			});
+		}).detach();
+	}
+
+	// Getting off: the dismount animation plays on the seat first (she stays pinned to the horse while it does),
+	// then she is set down beside the horse.
+	void Alight(bool a_announce)
+	{
+		if (dismounting) {
+			return;
+		}
+		auto passenger = passengerH.get();
+		auto horse = horseH.get();
+		// the side-saddle seat has no dismount clip of its own: the normal one (made for straddling the horse)
+		// throws her up over the rider, so without a princess dismount event she just steps down
+		const std::string& ev = princessNow ? g.pDismountEvent : g.dismountEvent;
+		if (g.dismountAnim && passenger && horse && !horse->IsDead() && !passenger->IsDead() && !ev.empty() &&
+			passenger->NotifyAnimationGraph(RE::BSFixedString(ev.c_str()))) {
+			dismounting = true;
+			dismountAnnounce = a_announce;
+			dismountStart = RE::GetDurationOfApplicationRunTime();
+			leaving = false;
+			logger::info("dismount: '{}' playing for {:.1f}s", ev, g.dismountSeconds);
+			return;
+		}
+		FinishAlight(a_announce);
 	}
 
 	bool IsHumanoid(RE::Actor* a_actor)
@@ -611,6 +804,9 @@ namespace RideAlong
 
 	void Toggle()
 	{
+		if (dismounting) {
+			return;
+		}
 		if (passengerH) {
 			Alight(true);
 			return;
@@ -629,9 +825,104 @@ namespace RideAlong
 		Board(follower.get(), horse.get());
 	}
 
+	// ------------------------------------------------------------------ dialogue: "Ride with me." / "You can get down now."
+	void BoardPending()
+	{
+		pendingQueued = false;
+		auto follower = pendingH.get();
+		pendingH.reset();
+		auto                     player = RE::PlayerCharacter::GetSingleton();
+		RE::NiPointer<RE::Actor> horse;
+		if (!follower || passengerH || !player->IsOnMount() || !player->GetMount(horse) || !horse) {
+			return;
+		}
+		if (follower->IsDead() || follower->IsDisabled() || !follower->IsPlayerTeammate() || follower->IsOnMount() || !IsHumanoid(follower.get())) {
+			return;  // dismissed, on a horse of her own, or otherwise not coming
+		}
+		if (!follower->Is3DLoaded() || follower->GetDistance(player) > (g.range > 3000.0f ? g.range : 3000.0f)) {
+			Notify(std::format("{} is too far away to climb on.", follower->GetDisplayFullName()));
+			return;
+		}
+		Board(follower.get(), horse.get());
+	}
+
+	// Writes to the log why "Ride with me." / "You can get down now." do or don't show for this NPC.
+	void LogDialogueCheck()
+	{
+		auto mtm = RE::MenuTopicManager::GetSingleton();
+		RE::NiPointer<RE::TESObjectREFR> ref;
+		if (mtm) ref = mtm->speaker.get();
+		auto npc = ref ? ref->As<RE::Actor>() : nullptr;
+		if (!npc) return;
+		auto player = RE::PlayerCharacter::GetSingleton();
+		std::string line = std::format("dialogue with {}: quest running={} global={} teammate={} passenger={} playerMounted={} |",
+			npc->GetDisplayFullName(), dialogueQuest && dialogueQuest->IsRunning(), dialogueGlobal ? dialogueGlobal->value : -1.0f,
+			npc->IsPlayerTeammate(), passengerFaction && npc->IsInFaction(passengerFaction), player->IsOnMount());
+		for (auto [topic, name] : { std::pair{ rideTopic, "Ride" }, std::pair{ offTopic, "Off" } }) {
+			if (!topic) { line += std::format(" {}: no topic", name); continue; }
+			int pass = 0;
+			for (std::uint32_t i = 0; i < topic->numTopicInfos; ++i) {
+				auto info = topic->topicInfos[i];
+				if (info && info->objConditions.IsTrue(npc, player)) ++pass;
+			}
+			line += std::format(" {}: {} of {} lines pass", name, pass, topic->numTopicInfos);
+		}
+		logger::info("{}", line);
+	}
+
+	void HandleDialogueChoice()
+	{
+		auto player = RE::PlayerCharacter::GetSingleton();
+		if (auto off = askedOffH.get()) {
+			askedOffH.reset();
+			if (pendingH.get().get() == off.get()) {
+				pendingH.reset();
+			}
+			if (passengerH.get().get() == off.get()) {
+				Alight(true);
+			}
+		}
+		if (auto rider = askedRideH.get()) {
+			askedRideH.reset();
+			if (passengerH) {
+				Notify(std::format("{} is already riding with you.", passengerH.get() ? passengerH.get()->GetDisplayFullName() : "Someone"));
+				return;
+			}
+			RE::NiPointer<RE::Actor> horse;
+			if (player->IsOnMount() && player->GetMount(horse) && horse) {
+				Board(rider.get(), horse.get());
+			} else {
+				pendingH = rider->GetHandle();
+				Notify(std::format("{} will climb on behind you when you mount.", rider->GetDisplayFullName()));
+			}
+		}
+	}
+
 	// runs every frame from the camera update: after the horse has moved, before the frame is drawn
 	void Tick()
 	{
+		if (dismounting) {
+			auto passenger = passengerH.get();
+			auto horse = horseH.get();
+			const auto now = RE::GetDurationOfApplicationRunTime();
+			if (!passenger || !horse || horse->IsDead() || passenger->IsDead() || now - dismountStart >= static_cast<std::uint32_t>(g.dismountSeconds * 1000.0f)) {
+				if (!leaving) {
+					leaving = true;
+					const bool announce = dismountAnnounce;
+					SKSE::GetTaskInterface()->AddTask([announce] { FinishAlight(announce); });
+				}
+				return;
+			}
+			Place(passenger.get(), horse.get());  // keep her on the seat while the animation plays
+			return;
+		}
+		if (!passengerH && pendingH && !pendingQueued) {
+			auto player = RE::PlayerCharacter::GetSingleton();
+			if (player && player->IsOnMount()) {
+				pendingQueued = true;
+				SKSE::GetTaskInterface()->AddTask([] { BoardPending(); });
+			}
+		}
 		if (!passengerH || leaving) {
 			return;
 		}
@@ -643,7 +934,7 @@ namespace RideAlong
 			return;
 		}
 		auto player = RE::PlayerCharacter::GetSingleton();
-		if (!player->IsOnMount() || (g.dismountInCombat && player->IsInCombat())) {
+		if (!player->IsOnMount()) {
 			leaving = true;
 			SKSE::GetTaskInterface()->AddTask([] { Alight(true); });
 			return;
@@ -696,12 +987,11 @@ namespace RideAlong
 				}
 			}
 		}
-		if (now - combatCheckTime >= 250) {
-			combatCheckTime = now;
-			CombatControl(passenger.get());
+		if (g.noCombat) {
+			KeepPeaceful(passenger.get());  // every frame, so a fight never gets as far as pulling her out of the seat
 		}
 		SyncGraphVars(player, passenger.get());
-		if (g.copyPose) {
+		if (princessNow ? g.princessCopyPose : g.copyPose) {
 			CopyPose(passenger.get(), player);
 		}
 		if (g.dumpGraphVars && !dumpedMoving && now - boardTime > 8000) {
@@ -785,17 +1075,195 @@ namespace RideAlong
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			for (auto e = *a_event; e; e = e->next) {
-				if (e->GetEventType() != RE::INPUT_EVENT_TYPE::kButton || e->GetDevice() != RE::INPUT_DEVICE::kKeyboard) {
+				if (e->GetEventType() != RE::INPUT_EVENT_TYPE::kButton) {
 					continue;
 				}
 				const auto button = e->AsButtonEvent();
-				if (button && button->IsDown() && button->GetIDCode() == g.hotkey) {
-					SKSE::GetTaskInterface()->AddTask([] { Toggle(); });
+				if (!button) {
+					continue;
+				}
+				if (e->GetDevice() == RE::INPUT_DEVICE::kKeyboard) {
+					if (g.hotkeyEnabled && button->IsDown() && button->GetIDCode() == g.hotkey) {
+						SKSE::GetTaskInterface()->AddTask([] { Toggle(); });
+					}
+				} else if (e->GetDevice() == RE::INPUT_DEVICE::kGamepad && g.padButton != 0 && button->GetIDCode() == g.padButton) {
+					// held, not tapped: every controller button already does something while riding
+					if (button->IsUp()) {
+						padFired = false;
+					} else if (button->IsPressed() && !padFired && button->HeldDuration() >= g.padHold) {
+						padFired = true;
+						SKSE::GetTaskInterface()->AddTask([] { Toggle(); });
+					}
 				}
 			}
 			return RE::BSEventNotifyControl::kContinue;
 		}
 	};
+}
+
+namespace RideAlong
+{
+	// the dialogue choice is acted on once the conversation closes, so the boarding isn't hidden behind the dialogue camera
+	class EventSink :
+		public RE::BSTEventSink<RE::TESTopicInfoEvent>,
+		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	{
+	public:
+		static EventSink* Get()
+		{
+			static EventSink sink;
+			return &sink;
+		}
+
+		RE::BSEventNotifyControl ProcessEvent(const RE::TESTopicInfoEvent* a_event, RE::BSTEventSource<RE::TESTopicInfoEvent>*) override
+		{
+			if (!a_event || !a_event->speakerRef || a_event->type.get() != RE::TESTopicInfoEvent::TopicInfoEventType::kTopicBegin ||
+				(!rideTopic && !offTopic)) {
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			auto info = RE::TESForm::LookupByID<RE::TESTopicInfo>(a_event->topicInfoFormID);
+			auto actor = a_event->speakerRef->As<RE::Actor>();
+			if (!info || !actor) {
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			if (info->parentTopic && info->parentTopic == rideTopic) {
+				askedRideH = actor->GetHandle();
+			} else if (info->parentTopic && info->parentTopic == offTopic) {
+				askedOffH = actor->GetHandle();
+			}
+			return RE::BSEventNotifyControl::kContinue;
+		}
+
+		RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+		{
+			if (a_event && a_event->opening && std::string_view(a_event->menuName.c_str()) == RE::DialogueMenu::MENU_NAME) {
+				SKSE::GetTaskInterface()->AddTask([] { LogDialogueCheck(); });
+			}
+			if (a_event && !a_event->opening && std::string_view(a_event->menuName.c_str()) == RE::DialogueMenu::MENU_NAME && (askedRideH || askedOffH)) {
+				SKSE::GetTaskInterface()->AddTask([] { HandleDialogueChoice(); });
+			}
+			return RE::BSEventNotifyControl::kContinue;
+		}
+	};
+
+	// ------------------------------------------------------------------ SKSE Menu Framework page (optional)
+	namespace Menu
+	{
+		struct Choice
+		{
+			const char*   name;
+			std::uint32_t code;
+		};
+		// DirectX scan codes
+		constexpr Choice KEYS[] = { { "K", 0x25 }, { "G", 0x22 }, { "V", 0x2F }, { "B", 0x30 }, { "H", 0x23 }, { "J", 0x24 }, { "L", 0x26 },
+			{ "N", 0x31 }, { "M", 0x32 }, { "O", 0x18 }, { "P", 0x19 }, { "U", 0x16 }, { "Y", 0x15 }, { "T", 0x14 }, { "X", 0x2D },
+			{ "C", 0x2E }, { "Z", 0x2C }, { "F1", 0x3B }, { "F2", 0x3C }, { "F3", 0x3D }, { "F4", 0x3E }, { "F5", 0x3F }, { "F6", 0x40 },
+			{ "F7", 0x41 }, { "F8", 0x42 }, { "F9", 0x43 }, { "F10", 0x44 }, { "F11", 0x57 }, { "F12", 0x58 }, { "Numpad 0", 0x52 },
+			{ "Numpad 1", 0x4F }, { "Numpad 2", 0x50 }, { "Numpad 3", 0x51 }, { "Numpad 4", 0x4B }, { "Numpad 5", 0x4C },
+			{ "Numpad 6", 0x4D }, { "Numpad 7", 0x47 }, { "Numpad 8", 0x48 }, { "Numpad 9", 0x49 }, { "Insert", 0xD2 }, { "Home", 0xC7 },
+			{ "Page Up", 0xC9 }, { "Delete", 0xD3 }, { "End", 0xCF }, { "Page Down", 0xD1 }, { "Left Alt", 0x38 }, { "Right Alt", 0xB8 },
+			{ "Right Ctrl", 0x9D }, { "Caps Lock", 0x3A }, { "Backspace", 0x0E }, { "` (tilde)", 0x29 } };
+		// controller buttons as SKSE reports them
+		constexpr Choice PAD[] = { { "None", 0x0 }, { "D-pad Up", 0x0001 }, { "D-pad Down", 0x0002 }, { "D-pad Left", 0x0004 },
+			{ "D-pad Right", 0x0008 }, { "Start", 0x0010 }, { "Back / View", 0x0020 }, { "Left stick (click)", 0x0040 },
+			{ "Right stick (click)", 0x0080 }, { "LB", 0x0100 }, { "RB", 0x0200 }, { "A", 0x1000 }, { "B", 0x2000 }, { "X", 0x4000 },
+			{ "Y", 0x8000 }, { "LT", 0x0009 }, { "RT", 0x000A } };
+
+		template <std::size_t N>
+		bool PickCombo(const char* a_label, const Choice (&a_list)[N], std::uint32_t& a_code)
+		{
+			const char* names[N];
+			int         current = -1;
+			for (std::size_t i = 0; i < N; ++i) {
+				names[i] = a_list[i].name;
+				if (a_list[i].code == a_code) current = static_cast<int>(i);
+			}
+			if (current < 0) {
+				ImGui::Text("%s: custom code 0x%X (from RideAlong.ini)", a_label, a_code);
+				current = 0;
+				if (!ImGui::Button("Use the list instead")) return false;
+				a_code = a_list[0].code;
+				return true;
+			}
+			if (ImGui::Combo(a_label, &current, names, static_cast<int>(N))) {
+				a_code = a_list[current].code;
+				return true;
+			}
+			return false;
+		}
+
+		bool        dirty = false;
+		std::string status;
+
+		void __stdcall Render()
+		{
+			ImGui::TextWrapped("%s", "Changes apply right away. Press Save to keep them for next time.");
+
+			ImGui::SeparatorText("Getting on and off");
+			dirty |= ImGui::Checkbox("Use the keyboard key", &g.hotkeyEnabled);
+			dirty |= PickCombo("Keyboard key", KEYS, g.hotkey);
+			dirty |= PickCombo("Controller button (hold)", PAD, g.padButton);
+			dirty |= ImGui::SliderFloat("Hold time (seconds)", &g.padHold, 0.0f, 2.0f, "%.1f");
+			if (ImGui::Checkbox("\"Ride with me.\" in follower dialogue", &g.dialogueEnabled)) {
+				dirty = true;
+				SKSE::GetTaskInterface()->AddTask([] { ApplyDialogueSetting(false); });  // game data: on the main thread
+			}
+			if (!passengerFaction) {
+				ImGui::TextWrapped("%s", "(RideAlong.esp isn't active: the dialogue option needs it.)");
+			}
+			dirty |= ImGui::SliderFloat("Follower range", &g.range, 300.0f, 4000.0f, "%.0f");
+			dirty |= ImGui::Checkbox("Passenger stays out of fights", &g.noCombat);
+
+			ImGui::SeparatorText("Seat");
+			dirty |= ImGui::SliderFloat("Behind the saddle", &g.back, -20.0f, 80.0f, "%.0f");
+			dirty |= ImGui::SliderFloat("Height", &g.up, -40.0f, 40.0f, "%.0f");
+			dirty |= ImGui::SliderFloat("Left / right", &g.side, -40.0f, 40.0f, "%.0f");
+
+			ImGui::SeparatorText("Getting off");
+			dirty |= ImGui::Checkbox("Dismount animation", &g.dismountAnim);
+			dirty |= ImGui::SliderFloat("Animation time (seconds)", &g.dismountSeconds, 0.3f, 3.0f, "%.1f");
+
+			ImGui::SeparatorText("Princess seat (female passengers)");
+			ImGui::TextWrapped("%s", "Female passengers sit sideways. Needs a sitting animation set up in OAR - see the Ride Along readme.");
+			dirty |= ImGui::Checkbox("Use the princess seat", &g.princess);
+			if (g.princess && !PrincessAnimsInstalled()) {
+				ImGui::TextWrapped("%s", "The side-saddle animations aren't installed: copy the horse_rider folder from YY Anim Replacer - Princess' Horse Riding into the Princess Seat add-on's Passenger folder (see its readme). Until then she rides astride.");
+			}
+			dirty |= ImGui::SliderFloat("Princess: behind the saddle", &g.pBack, -20.0f, 80.0f, "%.0f");
+			dirty |= ImGui::SliderFloat("Princess: height", &g.pUp, -40.0f, 40.0f, "%.0f");
+			dirty |= ImGui::SliderFloat("Princess: left / right", &g.pSide, -40.0f, 40.0f, "%.0f");
+			dirty |= ImGui::SliderFloat("Princess: turn (degrees)", &g.pTurn, -180.0f, 180.0f, "%.0f");
+			dirty |= ImGui::Checkbox("Princess: copy your leg movement", &g.princessCopyPose);
+			if (passengerH && passengerH.get()) {
+				ImGui::Text("Riding with you: %s%s", passengerH.get()->GetDisplayFullName(), princessNow ? " (princess seat)" : "");
+			}
+
+			ImGui::Separator();
+			if (ImGui::Button("Save")) {
+				SaveSettings();
+				dirty = false;
+				status = "Saved to RideAlong.ini.";
+			}
+			if (dirty) {
+				ImGui::SameLine();
+				ImGui::Text("%s", "Unsaved changes");
+			} else if (!status.empty()) {
+				ImGui::SameLine();
+				ImGui::Text("%s", status.c_str());
+			}
+		}
+
+		void Register()
+		{
+			if (!SKSEMenuFramework::IsInstalled()) {
+				logger::info("SKSE Menu Framework not installed - settings stay in RideAlong.ini");
+				return;
+			}
+			SKSEMenuFramework::SetSection("Ride Along");
+			SKSEMenuFramework::AddSectionItem("Settings", Render);
+			logger::info("settings page added to SKSE Menu Framework");
+		}
+	}
 }
 
 SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
@@ -812,14 +1280,34 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
 
 	SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 		switch (a_msg->type) {
+		case SKSE::MessagingInterface::kPostLoad:
+			RideAlong::Menu::Register();  // every plugin is loaded by now, the menu framework included
+			break;
 		case SKSE::MessagingInterface::kDataLoaded:
 			RE::BSInputDeviceManager::GetSingleton()->AddEventSink(RideAlong::InputSink::Get());
+			RideAlong::LoadForms();
+			RideAlong::ApplyDialogueSetting(false);
+			if (auto src = RE::ScriptEventSourceHolder::GetSingleton()) {
+				src->AddEventSink<RE::TESTopicInfoEvent>(RideAlong::EventSink::Get());
+			}
+			if (auto ui = RE::UI::GetSingleton()) {
+				ui->AddEventSink<RE::MenuOpenCloseEvent>(RideAlong::EventSink::Get());
+			}
 			logger::info("input listener registered");
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
 			RideAlong::Reset();
-			RideAlong::swappedToBow = false;
+			RideAlong::pendingH.reset();
+			RideAlong::askedRideH.reset();
+			RideAlong::askedOffH.reset();
+			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
+				RideAlong::ApplyDialogueSetting(true);
+			}
+			break;
+		case SKSE::MessagingInterface::kPostLoadGame:
+			RideAlong::ApplyDialogueSetting(true);
+			RideAlong::ReleaseSavedPassengers();
 			break;
 		default:
 			break;
