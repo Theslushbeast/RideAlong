@@ -1,0 +1,183 @@
+{
+ "groups": {
+  "Ride": [
+   "0x7a1eb",
+   "0xd8db3",
+   "0xd8db2",
+   "0xd8db1",
+   "0xd8db0",
+   "0x7508e",
+   "0x4c468",
+   "0x7508f",
+   "0x5c838",
+   "0xe36db",
+   "0xe3e79",
+   "0x7a519",
+   "0xf11b1",
+   "0x7a516",
+   "0xe26f2",
+   "0xe26f3",
+   "0xe155c"
+  ],
+  "Off": [
+   "0x5c83b",
+   "0x7a51b",
+   "0x750a6",
+   "0xe36df"
+  ]
+ },
+ "cov": {
+  "0x7a1eb": [
+   "0x13ad1",
+   "0x13ad2",
+   "0x13adc",
+   "0x13add",
+   "0x13ae0",
+   "0x13ae4",
+   "0xea267"
+  ],
+  "0xd8db3": [
+   "0x13ad4",
+   "0x13ada",
+   "0x13ae3",
+   "0x13ae6",
+   "0x13af2",
+   "0x13af3"
+  ],
+  "0xd8db2": [
+   "0x13aea",
+   "0x13aeb"
+  ],
+  "0xd8db1": [
+   "0x13aee"
+  ],
+  "0xd8db0": [
+   "0x13aec"
+  ],
+  "0x7508e": [
+   "0x13ad1",
+   "0x3bda4"
+  ],
+  "0x4c468": [
+   "0x13ad1",
+   "0x13ae6"
+  ],
+  "0x7508f": [
+   "0x14432"
+  ],
+  "0x5c838": [
+   "0x13ad2",
+   "0x13ada",
+   "0x13adc",
+   "0x13add",
+   "0x13ae3",
+   "0x13ae6"
+  ],
+  "0xe36db": [
+   "0x13ae7"
+  ],
+  "0xe3e79": [
+   "0x13af2"
+  ],
+  "0x7a519": [
+   "0xea267"
+  ],
+  "0xf11b1": [
+   "0x13ad1"
+  ],
+  "0x7a516": [
+   "0x13ae6"
+  ],
+  "0xe26f2": [
+   "0x13aec"
+  ],
+  "0xe26f3": [
+   "0x13adc"
+  ],
+  "0xe155c": [
+   "0x3bda4"
+  ],
+  "0x5c83b": [
+   "0x13ad2",
+   "0x13ada",
+   "0x13adc",
+   "0x13add",
+   "0x13ae3",
+   "0x13ae6"
+  ],
+  "0x7a51b": [
+   "0x13af3"
+  ],
+  "0x750a6": [
+   "0x14432"
+  ],
+  "0xe36df": [
+   "0x13ae7"
+  ]
+ },
+ "text": {
+  "0x7a1eb": [
+   "Let's get going."
+  ],
+  "0xd8db3": [
+   "Lead the way."
+  ],
+  "0xd8db2": [
+   "To the next fight."
+  ],
+  "0xd8db1": [
+   "I will walk alongside you."
+  ],
+  "0xd8db0": [
+   "Khajiit walks in your footsteps."
+  ],
+  "0x7508e": [
+   "I'm right with you."
+  ],
+  "0x4c468": [
+   "Good. I'm ready for anything."
+  ],
+  "0x7508f": [
+   "I've got your back."
+  ],
+  "0x5c838": [
+   "As you will, my Thane. I will protect you with my life."
+  ],
+  "0xe36db": [
+   "I'm ready. Let's go."
+  ],
+  "0xe3e79": [
+   "Certainly, I'm ready."
+  ],
+  "0x7a519": [
+   "I'm ready."
+  ],
+  "0xf11b1": [
+   "Great! Let's go!"
+  ],
+  "0x7a516": [
+   "Onward to our next adventure!"
+  ],
+  "0xe26f2": [
+   "J'zargo is ready for more adventure."
+  ],
+  "0xe26f3": [
+   "Of course. Let's go."
+  ],
+  "0xe155c": [
+   "Good. We should keep moving."
+  ],
+  "0x5c83b": [
+   "As you wish, my Thane."
+  ],
+  "0x7a51b": [
+   "As you wish."
+  ],
+  "0x750a6": [
+   "If you say so."
+  ],
+  "0xe36df": [
+   "Certainly. Be careful."
+  ]
+ }
+}

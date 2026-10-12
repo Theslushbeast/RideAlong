@@ -1,0 +1,13 @@
+{
+  "name": "Passenger",
+  "description": "Female Ride Along passengers sit sidesaddle. The rider (you) and everyone else keep their normal riding animations.",
+  "priority": 900000,
+  "interruptible": true,
+  "replaceOnLoop": true,
+  "replaceOnEcho": true,
+  "conditions": [
+    { "condition": "IsInFaction", "requiredVersion": "1.0.0.0",
+      "Faction": { "pluginName": "RideAlong.esp", "formID": "802" } },
+    { "condition": "IsFemale", "requiredVersion": "1.0.0.0" }
+  ]
+}
