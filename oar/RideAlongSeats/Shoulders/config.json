@@ -1,0 +1,22 @@
+{
+  "name": "Shoulders",
+  "description": "The passenger on your shoulders (\"Ride on my shoulders.\"). Animation made for Ride Along by a member of the Nexus community.",
+  "priority": 900030,
+  "interruptible": true,
+  "replaceOnLoop": true,
+  "replaceOnEcho": true,
+  "conditions": [
+    {
+      "condition": "FactionRank",
+      "requiredVersion": "1.0.0.0",
+      "Faction": {
+        "pluginName": "RideAlong.esp",
+        "formID": "802"
+      },
+      "Comparison": "==",
+      "Numeric value": {
+        "value": 3.0
+      }
+    }
+  ]
+}

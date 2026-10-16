@@ -93,6 +93,7 @@ copy /y "build\Release\RideAlong.dll" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
 if exist "build\Release\RideAlong.pdb" copy /y "build\Release\RideAlong.pdb" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
 if not exist "%MODDIR%\SKSE\Plugins\RideAlong.ini" copy /y "RideAlong.ini" "%MODDIR%\SKSE\Plugins\" >> "%LOG%" 2>&1
 if exist "esp\RideAlong.esp" copy /y "esp\RideAlong.esp" "%MODDIR%\" >> "%LOG%" 2>&1
+xcopy /e /i /y "oar\RideAlongSeats" "%MODDIR%\meshes\actors\character\animations\OpenAnimationReplacer\RideAlongSeats" >> "%LOG%" 2>&1
 copy /y "README_PrincessSeat.txt" "%MODDIR%\" >> "%LOG%" 2>&1
 echo [OK] Built and copied to "%MODDIR%" >> "%LOG%"
 echo.

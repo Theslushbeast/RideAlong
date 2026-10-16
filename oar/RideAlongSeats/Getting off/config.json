@@ -1,0 +1,22 @@
+{
+  "name": "Getting off",
+  "description": "Climbing off the horse (the game's own dismount animation).",
+  "priority": 900110,
+  "interruptible": true,
+  "replaceOnLoop": true,
+  "replaceOnEcho": true,
+  "conditions": [
+    {
+      "condition": "FactionRank",
+      "requiredVersion": "1.0.0.0",
+      "Faction": {
+        "pluginName": "RideAlong.esp",
+        "formID": "802"
+      },
+      "Comparison": "==",
+      "Numeric value": {
+        "value": 11.0
+      }
+    }
+  ]
+}

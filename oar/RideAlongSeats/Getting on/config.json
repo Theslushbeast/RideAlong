@@ -1,0 +1,22 @@
+{
+  "name": "Getting on",
+  "description": "Climbing onto the horse (the game's own mount animation).",
+  "priority": 900100,
+  "interruptible": true,
+  "replaceOnLoop": true,
+  "replaceOnEcho": true,
+  "conditions": [
+    {
+      "condition": "FactionRank",
+      "requiredVersion": "1.0.0.0",
+      "Faction": {
+        "pluginName": "RideAlong.esp",
+        "formID": "802"
+      },
+      "Comparison": "==",
+      "Numeric value": {
+        "value": 10.0
+      }
+    }
+  ]
+}

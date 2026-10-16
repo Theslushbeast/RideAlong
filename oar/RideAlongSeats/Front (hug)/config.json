@@ -1,0 +1,22 @@
+{
+  "name": "Front (hug)",
+  "description": "The passenger in front of you (\"Ride in front of me.\"). Animation made for Ride Along by a member of the Nexus community.",
+  "priority": 900020,
+  "interruptible": true,
+  "replaceOnLoop": true,
+  "replaceOnEcho": true,
+  "conditions": [
+    {
+      "condition": "FactionRank",
+      "requiredVersion": "1.0.0.0",
+      "Faction": {
+        "pluginName": "RideAlong.esp",
+        "formID": "802"
+      },
+      "Comparison": "==",
+      "Numeric value": {
+        "value": 2.0
+      }
+    }
+  ]
+}

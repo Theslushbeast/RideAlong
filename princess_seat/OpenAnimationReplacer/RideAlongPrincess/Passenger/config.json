@@ -1,13 +1,22 @@
 {
   "name": "Passenger",
-  "description": "Female Ride Along passengers sit sidesaddle. The rider (you) and everyone else keep their normal riding animations.",
+  "description": "Female Ride Along passengers behind you sit side-saddle (Princess seat on in the Ride Along settings). The rider (you) and everyone else keep their normal riding animations.",
   "priority": 900000,
   "interruptible": true,
   "replaceOnLoop": true,
   "replaceOnEcho": true,
   "conditions": [
-    { "condition": "IsInFaction", "requiredVersion": "1.0.0.0",
-      "Faction": { "pluginName": "RideAlong.esp", "formID": "802" } },
-    { "condition": "IsFemale", "requiredVersion": "1.0.0.0" }
+    {
+      "condition": "FactionRank",
+      "requiredVersion": "1.0.0.0",
+      "Faction": {
+        "pluginName": "RideAlong.esp",
+        "formID": "802"
+      },
+      "Comparison": "==",
+      "Numeric value": {
+        "value": 1.0
+      }
+    }
   ]
 }
